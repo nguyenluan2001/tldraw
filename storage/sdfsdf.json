@@ -18527,7 +18527,7 @@
         "pageId": "page:page",
         "camera": {
           "x": 0,
-          "y": 0,
+          "y": -120,
           "z": 1
         },
         "selectedShapeIds": [],

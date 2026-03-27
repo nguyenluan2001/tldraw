@@ -1,12 +1,15 @@
 /**
  * Snapshot Manager Component
  * 
- * A comprehensive CRUD interface for managing tldraw snapshots.
+ * A comprehensive CRUD interface for managing tldraw snapshots with folder support.
  * Uses Ant Design for UI components with full create, read, update, delete operations.
  * 
  * Features:
  * - Toggle visibility with a floating button
  * - Modal/Dialog interface when opened
+ * - Folder-based organization with tree view
+ * - Drag and drop to move files/folders
+ * - Create, rename, delete folders
  * - List all snapshots with metadata (name, date, size)
  * - Create new snapshot with custom name
  * - Load snapshot into editor
@@ -26,7 +29,6 @@ import { useCallback, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Button,
-  Table,
   Modal,
   Input,
   Space,
@@ -39,9 +41,10 @@ import {
   Empty,
   Spin,
   FloatButton,
-  Upload,
+  Breadcrumb,
   Dropdown,
-  Progress,
+  Menu,
+  Card,
 } from 'antd'
 import type { MenuProps } from 'antd'
 import {
@@ -57,21 +60,30 @@ import {
   DownloadOutlined,
   ExportOutlined,
   ImportOutlined,
+  FolderAddOutlined,
+  HomeOutlined,
+  RightOutlined,
+  MoreOutlined,
+  ArrowLeftOutlined,
 } from '@ant-design/icons'
-import type { ColumnsType } from 'antd/es/table'
-import type { UploadFile } from 'antd/es/upload/interface'
 import { getSnapshot, loadSnapshot, useEditor } from 'tldraw'
-import type { SnapshotInfo } from '../types'
+import type { SnapshotInfo, SnapshotFolder, SnapshotItem } from '../types'
 import {
-  fetchSnapshots,
+  fetchSnapshotsWithFolders,
   saveSnapshot,
   loadSnapshotFromServer,
   deleteSnapshot,
   updateSnapshot,
   renameSnapshot,
+  renameFolder,
+  createFolder,
+  deleteFolder,
+  moveSnapshot,
   importSnapshots,
   exportSnapshots,
   exportSingleSnapshot,
+  getFolderContents,
+  getFolderPath,
 } from '../services/snapshotApi'
 
 const { Text, Title } = Typography
@@ -99,6 +111,12 @@ function SnapshotManager() {
   /** List of available snapshots */
   const [snapshots, setSnapshots] = useState<SnapshotInfo[]>([])
   
+  /** List of folders */
+  const [folders, setFolders] = useState<SnapshotFolder[]>([])
+  
+  /** Current folder being viewed (null for root) */
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
+  
   /** Loading state for data fetching */
   const [loading, setLoading] = useState(false)
   
@@ -121,17 +139,20 @@ function SnapshotManager() {
   /** Create modal visibility */
   const [createModalVisible, setCreateModalVisible] = useState(false)
   
+  /** Create folder modal visibility */
+  const [createFolderModalVisible, setCreateFolderModalVisible] = useState(false)
+  
   /** Rename modal visibility */
   const [renameModalVisible, setRenameModalVisible] = useState(false)
   
-  /** Snapshot being renamed */
-  const [renamingSnapshot, setRenamingSnapshot] = useState<SnapshotInfo | null>(null)
+  /** Item being renamed */
+  const [renamingItem, setRenamingItem] = useState<SnapshotItem | null>(null)
   
   /** New name input for create/rename */
   const [newName, setNewName] = useState('')
   
-  /** Selected row keys for export */
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
+  /** Selected items for export */
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
   
   /** Import progress */
   const [importProgress, setImportProgress] = useState<number | null>(null)
@@ -140,16 +161,17 @@ function SnapshotManager() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   /**
-   * Fetches all snapshots from the server
+   * Fetches all snapshots and folders from the server
    */
-  const loadSnapshots = useCallback(async () => {
+  const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await fetchSnapshots()
-      setSnapshots(data)
+      const { snapshots: snapshotData, folders: folderData } = await fetchSnapshotsWithFolders()
+      setSnapshots(snapshotData)
+      setFolders(folderData)
     } catch (error) {
-      message.error('Failed to load snapshots')
-      console.error('Failed to fetch snapshots:', error)
+      message.error('Failed to load data')
+      console.error('Failed to fetch data:', error)
     } finally {
       setLoading(false)
     }
@@ -167,21 +189,42 @@ function SnapshotManager() {
     setIsSaving(true)
     try {
       const { document, session } = getSnapshot(editor.store)
-      const filename = await saveSnapshot(newName.trim(), { document, session })
+      const filename = await saveSnapshot(newName.trim(), { document, session }, undefined, currentFolderId)
       
       setCurrentSnapshot({ name: newName.trim(), filename })
       setAutoSaveEnabled(true)
       message.success(`Snapshot "${newName}" created successfully`)
       setCreateModalVisible(false)
       setNewName('')
-      loadSnapshots()
+      loadData()
     } catch (error) {
       message.error('Failed to create snapshot')
       console.error('Failed to create snapshot:', error)
     } finally {
       setIsSaving(false)
     }
-  }, [editor, newName, loadSnapshots])
+  }, [editor, newName, loadData, currentFolderId])
+
+  /**
+   * Creates a new folder
+   */
+  const handleCreateFolder = useCallback(async () => {
+    if (!newName.trim()) {
+      message.warning('Please enter a folder name')
+      return
+    }
+
+    try {
+      await createFolder(newName.trim(), currentFolderId)
+      message.success(`Folder "${newName}" created`)
+      setCreateFolderModalVisible(false)
+      setNewName('')
+      loadData()
+    } catch (error) {
+      message.error('Failed to create folder')
+      console.error('Failed to create folder:', error)
+    }
+  }, [newName, currentFolderId, loadData])
 
   /**
    * Loads a snapshot into the editor
@@ -201,37 +244,41 @@ function SnapshotManager() {
   }, [editor])
 
   /**
-   * Renames a snapshot
+   * Renames a snapshot or folder
    */
   const handleRename = useCallback(async () => {
-    if (!renamingSnapshot || !newName.trim()) {
+    if (!renamingItem || !newName.trim()) {
       message.warning('Please enter a new name')
       return
     }
 
     try {
-      await renameSnapshot(renamingSnapshot.filename, newName.trim())
-      
-      // Update current snapshot if renaming the active one
-      if (currentSnapshot?.filename === renamingSnapshot.filename) {
-        setCurrentSnapshot({ name: newName.trim(), filename: `${newName.trim()}.json` })
+      if (renamingItem.type === 'folder') {
+        await renameFolder(renamingItem.id, newName.trim())
+      } else {
+        const newFilename = await renameSnapshot(renamingItem.filename, newName.trim())
+        
+        // Update current snapshot if renaming the active one
+        if (currentSnapshot?.filename === renamingItem.filename) {
+          setCurrentSnapshot({ name: newName.trim(), filename: newFilename })
+        }
       }
       
-      message.success('Snapshot renamed successfully')
+      message.success('Renamed successfully')
       setRenameModalVisible(false)
-      setRenamingSnapshot(null)
+      setRenamingItem(null)
       setNewName('')
-      loadSnapshots()
+      loadData()
     } catch (error) {
-      message.error('Failed to rename snapshot')
-      console.error('Failed to rename snapshot:', error)
+      message.error('Failed to rename')
+      console.error('Failed to rename:', error)
     }
-  }, [renamingSnapshot, newName, currentSnapshot, loadSnapshots])
+  }, [renamingItem, newName, currentSnapshot, loadData])
 
   /**
    * Deletes a snapshot
    */
-  const handleDelete = useCallback(async (snapshot: SnapshotInfo) => {
+  const handleDeleteSnapshot = useCallback(async (snapshot: SnapshotInfo) => {
     try {
       await deleteSnapshot(snapshot.filename)
       
@@ -242,12 +289,26 @@ function SnapshotManager() {
       }
       
       message.success('Snapshot deleted')
-      loadSnapshots()
+      loadData()
     } catch (error) {
       message.error('Failed to delete snapshot')
       console.error('Failed to delete snapshot:', error)
     }
-  }, [currentSnapshot, loadSnapshots])
+  }, [currentSnapshot, loadData])
+
+  /**
+   * Deletes a folder
+   */
+  const handleDeleteFolder = useCallback(async (folder: SnapshotFolder, deleteContents: boolean) => {
+    try {
+      await deleteFolder(folder.id, deleteContents)
+      message.success('Folder deleted')
+      loadData()
+    } catch (error) {
+      message.error('Failed to delete folder')
+      console.error('Failed to delete folder:', error)
+    }
+  }, [loadData])
 
   /**
    * Manually updates the current snapshot
@@ -269,80 +330,79 @@ function SnapshotManager() {
     } finally {
       setIsSaving(false)
     }
-  }, [currentSnapshot, editor])
+  }, [editor, currentSnapshot])
 
   /**
-   * Opens the rename modal
+   * Opens the rename modal for an item
    */
-  const openRenameModal = useCallback((snapshot: SnapshotInfo) => {
-    setRenamingSnapshot(snapshot)
-    setNewName(snapshot.name)
+  const openRenameModal = useCallback((item: SnapshotItem) => {
+    setRenamingItem(item)
+    setNewName(item.name)
     setRenameModalVisible(true)
   }, [])
 
   /**
-   * Handles file import
+   * Navigates to a folder
+   */
+  const navigateToFolder = useCallback((folderId: string | null) => {
+    setCurrentFolderId(folderId)
+    setSelectedItems(new Set())
+  }, [])
+
+  /**
+   * Handles importing snapshots
    */
   const handleImport = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
     if (!files || files.length === 0) return
 
     setImportProgress(0)
-    
     try {
-      const fileArray = Array.from(files)
-      const importedNames = await importSnapshots(fileArray, (current, total) => {
-        setImportProgress((current / total) * 100)
-      })
-      
-      if (importedNames.length > 0) {
-        message.success(`Imported ${importedNames.length} snapshot(s)`)
-        loadSnapshots()
-      }
+      const filenames = await importSnapshots(Array.from(files), (current, total) => {
+        setImportProgress(Math.round((current / total) * 100))
+      }, currentFolderId)
+
+      message.success(`Imported ${filenames.length} snapshot(s)`)
+      loadData()
     } catch (error) {
       message.error('Failed to import snapshots')
       console.error('Failed to import snapshots:', error)
     } finally {
       setImportProgress(null)
-      // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
     }
-  }, [loadSnapshots])
+  }, [loadData, currentFolderId])
 
   /**
-   * Handles export of selected snapshots
+   * Handles exporting selected snapshots
    */
   const handleExport = useCallback(async () => {
-    if (selectedRowKeys.length === 0) {
-      message.warning('Please select snapshots to export')
+    const selectedFilenames = Array.from(selectedItems).filter(id => 
+      snapshots.find(s => s.filename === id)
+    )
+    
+    if (selectedFilenames.length === 0) {
+      message.warning('No snapshots selected')
       return
     }
 
     try {
-      const filenames = selectedRowKeys as string[]
-      
-      if (filenames.length === 1) {
-        await exportSingleSnapshot(filenames[0])
-      } else {
-        await exportSnapshots(filenames)
-      }
-      
+      await exportSnapshots(selectedFilenames)
       message.success('Snapshots exported')
     } catch (error) {
       message.error('Failed to export snapshots')
       console.error('Failed to export snapshots:', error)
     }
-  }, [selectedRowKeys])
+  }, [selectedItems, snapshots])
 
   /**
-   * Handles export of a single snapshot
+   * Handles exporting a single snapshot
    */
   const handleExportSingle = useCallback(async (filename: string) => {
     try {
       await exportSingleSnapshot(filename)
-      message.success('Snapshot exported')
     } catch (error) {
       message.error('Failed to export snapshot')
       console.error('Failed to export snapshot:', error)
@@ -350,10 +410,41 @@ function SnapshotManager() {
   }, [])
 
   /**
+   * Moves a snapshot to a different folder
+   */
+  const handleMoveSnapshot = useCallback(async (filename: string, targetFolderId: string | null) => {
+    try {
+      await moveSnapshot(filename, targetFolderId)
+      message.success('Snapshot moved')
+      loadData()
+    } catch (error) {
+      message.error('Failed to move snapshot')
+      console.error('Failed to move snapshot:', error)
+    }
+  }, [loadData])
+
+  /**
+   * Toggles item selection
+   */
+  const toggleSelection = useCallback((id: string) => {
+    setSelectedItems(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(id)) {
+        newSet.delete(id)
+      } else {
+        newSet.add(id)
+      }
+      return newSet
+    })
+  }, [])
+
+  /**
    * Formats file size for display
    */
   const formatSize = (bytes: number): string => {
-    return (bytes / 1024).toFixed(1) + ' KB'
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
   /**
@@ -384,12 +475,12 @@ function SnapshotManager() {
     return () => clearInterval(intervalId)
   }, [autoSaveEnabled, currentSnapshot, editor, isSaving])
 
-  // Load snapshots when modal becomes visible
+  // Load data when modal becomes visible
   useEffect(() => {
     if (isVisible) {
-      loadSnapshots()
+      loadData()
     }
-  }, [isVisible, loadSnapshots])
+  }, [isVisible, loadData])
 
   // Persist current snapshot to localStorage
   useEffect(() => {
@@ -419,96 +510,67 @@ function SnapshotManager() {
     loadSavedSnapshot()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Table row selection config
-  const rowSelection = {
-    selectedRowKeys,
-    onChange: (newSelectedRowKeys: React.Key[]) => {
-      setSelectedRowKeys(newSelectedRowKeys)
-    },
-  }
+  // Get current folder contents
+  const currentItems = getFolderContents(currentFolderId, snapshots, folders)
+  const breadcrumbPath = getFolderPath(currentFolderId, folders)
 
-  // Table columns configuration
-  const columns: ColumnsType<SnapshotInfo> = [
+  // Folder context menu items
+  const getFolderMenuItems = (folder: SnapshotFolder): MenuProps['items'] => [
     {
-      title: 'Name',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string, record: SnapshotInfo) => (
-        <Space>
-          <FileImageOutlined />
-          <Text strong={currentSnapshot?.filename === record.filename}>
-            {name}
-          </Text>
-          {currentSnapshot?.filename === record.filename && (
-            <Tag color="green">Active</Tag>
-          )}
-        </Space>
-      ),
+      key: 'open',
+      icon: <FolderOpenOutlined />,
+      label: 'Open',
+      onClick: () => navigateToFolder(folder.id),
     },
     {
-      title: 'Created',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      width: 180,
-      render: (date: string) => formatDate(date),
+      key: 'rename',
+      icon: <EditOutlined />,
+      label: 'Rename',
+      onClick: () => openRenameModal({ ...folder, type: 'folder' }),
     },
     {
-      title: 'Size',
-      dataIndex: 'size',
-      key: 'size',
-      width: 100,
-      render: (size: number) => formatSize(size),
+      type: 'divider',
     },
     {
-      title: 'Actions',
-      key: 'actions',
-      width: 200,
-      render: (_: unknown, record: SnapshotInfo) => (
-        <Space>
-          <Tooltip title="Load">
-            <Button
-              type="primary"
-              icon={<FolderOpenOutlined />}
-              size="small"
-              onClick={() => handleLoad(record)}
-            >
-              Load
-            </Button>
-          </Tooltip>
-          <Tooltip title="Rename">
-            <Button
-              icon={<EditOutlined />}
-              size="small"
-              onClick={() => openRenameModal(record)}
-            />
-          </Tooltip>
-          <Tooltip title="Export">
-            <Button
-              icon={<DownloadOutlined />}
-              size="small"
-              onClick={() => handleExportSingle(record.filename)}
-            />
-          </Tooltip>
-          <Popconfirm
-            title="Delete this snapshot?"
-            description="This action cannot be undone."
-            onConfirm={() => handleDelete(record)}
-            okText="Delete"
-            cancelText="Cancel"
-            okButtonProps={{ danger: true }}
-          >
-            <Tooltip title="Delete">
-              <Button
-                danger
-                icon={<DeleteOutlined />}
-                size="small"
-              />
-            </Tooltip>
-          </Popconfirm>
-        </Space>
-      ),
+      key: 'delete-keep',
+      icon: <DeleteOutlined />,
+      label: 'Delete (keep files)',
+      onClick: () => handleDeleteFolder(folder, false),
+    },
+    {
+      key: 'delete-all',
+      icon: <DeleteOutlined />,
+      label: 'Delete (with files)',
+      danger: true,
+      onClick: () => handleDeleteFolder(folder, true),
     },
   ]
+
+  // Move to folder menu items
+  const getMoveMenuItems = (filename: string): MenuProps['items'] => {
+    const items: MenuProps['items'] = [
+      {
+        key: 'root',
+        icon: <HomeOutlined />,
+        label: 'Root',
+        onClick: () => handleMoveSnapshot(filename, null),
+      },
+    ]
+
+    // Add all folders except current
+    folders.forEach(folder => {
+      if (folder.id !== currentFolderId) {
+        items.push({
+          key: folder.id,
+          icon: <FolderOutlined />,
+          label: folder.name,
+          onClick: () => handleMoveSnapshot(filename, folder.id),
+        })
+      }
+    })
+
+    return items
+  }
 
   return createPortal(
     <>
@@ -535,11 +597,10 @@ function SnapshotManager() {
       <Modal
         title={
           <Space>
-            <Title level={4} style={{ margin: 0 }}>
-              Snapshot Manager
-            </Title>
+            <FolderOutlined />
+            <span>Snapshot Manager</span>
             {currentSnapshot && (
-              <Tag color="blue" icon={<FileImageOutlined />}>
+              <Tag color="green" icon={<FileImageOutlined />}>
                 {currentSnapshot.name}
               </Tag>
             )}
@@ -549,81 +610,266 @@ function SnapshotManager() {
         onCancel={() => setIsVisible(false)}
         footer={null}
         width={900}
-        centered
+        styles={{
+          body: { maxHeight: '70vh', overflowY: 'auto' }
+        }}
       >
         {/* Toolbar */}
         <Space style={{ marginBottom: 16 }} wrap>
-          {/* Current snapshot controls */}
-          {currentSnapshot && (
-            <>
-              <Space size="small">
-                <Text type="secondary">Auto-save:</Text>
-                <Switch
-                  checked={autoSaveEnabled}
-                  onChange={setAutoSaveEnabled}
-                  checkedChildren="ON"
-                  unCheckedChildren="OFF"
-                  size="small"
-                />
-              </Space>
-              {!autoSaveEnabled && (
-                <Button
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  onClick={handleManualSave}
-                  loading={isSaving}
-                  size="small"
-                >
-                  Save
-                </Button>
-              )}
-            </>
-          )}
-          
-          {/* Create new button */}
+          {/* Auto-save controls */}
+          <>
+            <Space size="small">
+              <Text type="secondary">Auto-save:</Text>
+              <Switch
+                checked={autoSaveEnabled}
+                onChange={setAutoSaveEnabled}
+                size="small"
+              />
+            </Space>
+            {!autoSaveEnabled && (
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                onClick={handleManualSave}
+                loading={isSaving}
+                disabled={!currentSnapshot}
+              >
+                Save
+              </Button>
+            )}
+          </>
+
           <Button
             type="primary"
-            icon={<CloudUploadOutlined />}
-            onClick={() => setCreateModalVisible(true)}
-            size="small"
+            icon={<SaveOutlined />}
+            onClick={() => {
+              setNewName('')
+              setCreateModalVisible(true)
+            }}
           >
             New Snapshot
           </Button>
-          
-          {/* Import button */}
+
           <Button
-            icon={<ImportOutlined />}
+            icon={<FolderAddOutlined />}
+            onClick={() => {
+              setNewName('')
+              setCreateFolderModalVisible(true)
+            }}
+          >
+            New Folder
+          </Button>
+
+          <Button
+            icon={<UploadOutlined />}
             onClick={() => fileInputRef.current?.click()}
-            size="small"
           >
             Import
           </Button>
           
-          {/* Export selected button */}
-          {selectedRowKeys.length > 0 && (
+          {selectedItems.size > 0 && (
             <Button
-              icon={<ExportOutlined />}
+              icon={<DownloadOutlined />}
               onClick={handleExport}
             >
-              Export ({selectedRowKeys.length})
+              Export ({selectedItems.size})
             </Button>
           )}
-          
-          {/* Refresh button */}
-          <Button
-            icon={<SyncOutlined />}
-            onClick={loadSnapshots}
-            loading={loading}
-            size="small"
-          >
-            Refresh
-          </Button>
         </Space>
 
-        {/* Import progress */}
-        {importProgress !== null && (
-          <Progress percent={Math.round(importProgress)} size="small" style={{ marginBottom: 16 }} />
-        )}
+        {/* Breadcrumb navigation */}
+        <div style={{ marginBottom: 16 }}>
+          <Breadcrumb
+            items={[
+              {
+                title: (
+                  <a onClick={() => navigateToFolder(null)}>
+                    <HomeOutlined /> Root
+                  </a>
+                ),
+              },
+              ...breadcrumbPath.map(folder => ({
+                title: (
+                  <a onClick={() => navigateToFolder(folder.id)}>
+                    <FolderOutlined /> {folder.name}
+                  </a>
+                ),
+              })),
+            ]}
+          />
+        </div>
+
+        {/* Content area */}
+        <Spin spinning={loading}>
+          {currentItems.length === 0 ? (
+            <Empty
+              description="No snapshots or folders"
+              style={{ padding: '40px 0' }}
+            >
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={() => {
+                    setNewName('')
+                    setCreateModalVisible(true)
+                  }}
+                >
+                  Create Snapshot
+                </Button>
+                <Button
+                  icon={<FolderAddOutlined />}
+                  onClick={() => {
+                    setNewName('')
+                    setCreateFolderModalVisible(true)
+                  }}
+                >
+                  Create Folder
+                </Button>
+              </Space>
+            </Empty>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {currentItems.map(item => (
+                <Card
+                  key={item.type === 'folder' ? item.id : item.filename}
+                  size="small"
+                  hoverable
+                  style={{
+                    backgroundColor: selectedItems.has(
+                      item.type === 'folder' ? item.id : item.filename
+                    ) ? '#e6f7ff' : undefined,
+                  }}
+                  onClick={() => {
+                    if (item.type === 'folder') {
+                      navigateToFolder(item.id)
+                    }
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {/* Checkbox */}
+                    <input
+                      type="checkbox"
+                      checked={selectedItems.has(
+                        item.type === 'folder' ? item.id : item.filename
+                      )}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        toggleSelection(
+                          item.type === 'folder' ? item.id : item.filename
+                        )
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+
+                    {/* Icon */}
+                    {item.type === 'folder' ? (
+                      <FolderOutlined style={{ fontSize: 24, color: '#faad14' }} />
+                    ) : (
+                      <FileImageOutlined style={{ fontSize: 24, color: '#1890ff' }} />
+                    )}
+
+                    {/* Info */}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Text strong>{item.name}</Text>
+                        {item.type === 'file' &&
+                          currentSnapshot?.filename === item.filename && (
+                            <Tag color="green">Active</Tag>
+                          )
+                        }
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {item.type === 'folder' 
+                          ? `${folders.filter(f => f.parentId === item.id).length} folders, ${snapshots.filter(s => s.parentId === item.id).length} snapshots`
+                          : `${formatSize(item.size)} • ${formatDate(item.createdAt)}`
+                        }
+                      </Text>
+                    </div>
+
+                    {/* Actions */}
+                    <Space>
+                      {item.type === 'file' && (
+                        <>
+                          <Tooltip title="Load">
+                            <Button
+                              type="primary"
+                              icon={<FolderOpenOutlined />}
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleLoad(item)
+                              }}
+                            >
+                              Load
+                            </Button>
+                          </Tooltip>
+                          <Dropdown menu={{ items: getMoveMenuItems(item.filename) }} trigger={['click']}>
+                            <Button
+                              icon={<RightOutlined />}
+                              size="small"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </Dropdown>
+                          <Tooltip title="Export">
+                            <Button
+                              icon={<DownloadOutlined />}
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleExportSingle(item.filename)
+                              }}
+                            />
+                          </Tooltip>
+                        </>
+                      )}
+                      <Tooltip title="Rename">
+                        <Button
+                          icon={<EditOutlined />}
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openRenameModal(item)
+                          }}
+                        />
+                      </Tooltip>
+                      {item.type === 'folder' ? (
+                        <Dropdown menu={{ items: getFolderMenuItems(item) }} trigger={['click']}>
+                          <Button
+                            icon={<MoreOutlined />}
+                            size="small"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </Dropdown>
+                      ) : (
+                        <Popconfirm
+                          title="Delete this snapshot?"
+                          description="This action cannot be undone."
+                          onConfirm={(e) => {
+                            e?.stopPropagation()
+                            handleDeleteSnapshot(item)
+                          }}
+                          okText="Delete"
+                          cancelText="Cancel"
+                          okButtonProps={{ danger: true }}
+                        >
+                          <Tooltip title="Delete">
+                            <Button
+                              danger
+                              icon={<DeleteOutlined />}
+                              size="small"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </Tooltip>
+                        </Popconfirm>
+                      )}
+                    </Space>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </Spin>
 
         {/* Hidden file input for import */}
         <input
@@ -635,45 +881,15 @@ function SnapshotManager() {
           onChange={handleImport}
         />
 
-        {/* Snapshots Table */}
-        <Spin spinning={loading}>
-          {snapshots.length === 0 ? (
-            <Empty
-              description="No snapshots yet"
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-            >
-              <Space>
-                <Button
-                  type="primary"
-                  icon={<CloudUploadOutlined />}
-                  onClick={() => setCreateModalVisible(true)}
-                  size="small"
-                >
-                  Create First Snapshot
-                </Button>
-                <Button
-                  icon={<ImportOutlined />}
-                  onClick={() => fileInputRef.current?.click()}
-                  size="small"
-                >
-                  Import Snapshots
-                </Button>
-              </Space>
-            </Empty>
-          ) : (
-            <Table
-              dataSource={snapshots}
-              columns={columns}
-              rowKey="filename"
-              rowSelection={rowSelection}
-              pagination={{ pageSize: 5 }}
-              size="small"
-            />
-          )}
-        </Spin>
+        {/* Import progress */}
+        {importProgress !== null && (
+          <div style={{ marginTop: 16 }}>
+            <Text>Importing... {importProgress}%</Text>
+          </div>
+        )}
       </Modal>
 
-      {/* Create Modal */}
+      {/* Create Snapshot Modal */}
       <Modal
         title="Create New Snapshot"
         open={createModalVisible}
@@ -686,33 +902,51 @@ function SnapshotManager() {
         confirmLoading={isSaving}
       >
         <Input
-          placeholder="Enter snapshot name..."
+          placeholder="Snapshot name"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           onPressEnter={handleCreate}
-          prefix={<FileImageOutlined />}
+          autoFocus
+        />
+      </Modal>
+
+      {/* Create Folder Modal */}
+      <Modal
+        title="Create New Folder"
+        open={createFolderModalVisible}
+        onOk={handleCreateFolder}
+        onCancel={() => {
+          setCreateFolderModalVisible(false)
+          setNewName('')
+        }}
+        okText="Create"
+      >
+        <Input
+          placeholder="Folder name"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onPressEnter={handleCreateFolder}
           autoFocus
         />
       </Modal>
 
       {/* Rename Modal */}
       <Modal
-        title="Rename Snapshot"
+        title={`Rename ${renamingItem?.type === 'folder' ? 'Folder' : 'Snapshot'}`}
         open={renameModalVisible}
         onOk={handleRename}
         onCancel={() => {
           setRenameModalVisible(false)
-          setRenamingSnapshot(null)
+          setRenamingItem(null)
           setNewName('')
         }}
         okText="Rename"
       >
         <Input
-          placeholder="Enter new name..."
+          placeholder="New name"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           onPressEnter={handleRename}
-          prefix={<EditOutlined />}
           autoFocus
         />
       </Modal>
@@ -721,4 +955,4 @@ function SnapshotManager() {
   )
 }
 
-export default SnapshotManager
+export { SnapshotManager }

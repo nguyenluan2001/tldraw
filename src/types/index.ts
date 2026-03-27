@@ -14,12 +14,59 @@ import type { TLEditorSnapshot } from 'tldraw'
  * @property filename - Actual filename stored on the server (includes .json extension)
  * @property createdAt - Timestamp when the snapshot was created
  * @property size - File size in bytes
+ * @property path - Full path including parent folders (e.g., "folder1/subfolder/snapshot.json")
+ * @property parentId - ID of parent folder (null for root items)
  */
 export interface SnapshotInfo {
   name: string
   filename: string
   createdAt: string
   size: number
+  path?: string
+  parentId?: string | null
+}
+
+/**
+ * Represents a folder that can contain snapshots and other folders
+ *
+ * @property id - Unique folder identifier
+ * @property name - Display name of the folder
+ * @property path - Full path including parent folders
+ * @property parentId - ID of parent folder (null for root folders)
+ * @property createdAt - Timestamp when the folder was created
+ */
+export interface SnapshotFolder {
+  id: string
+  name: string
+  path: string
+  parentId: string | null
+  createdAt: string
+}
+
+/**
+ * Union type for any item in the snapshot tree (file or folder)
+ *
+ * @property type - Discriminator to identify if item is a file or folder
+ */
+export type SnapshotItem =
+  | (SnapshotInfo & { type: 'file' })
+  | (SnapshotFolder & { type: 'folder' })
+
+/**
+ * Tree node for displaying folder structure
+ *
+ * @property key - Unique key for the node (used by Ant Design Tree)
+ * @property title - Display title
+ * @property children - Child nodes
+ * @property isLeaf - Whether this is a leaf node (file)
+ * @property item - The original SnapshotItem data
+ */
+export interface SnapshotTreeNode {
+  key: string
+  title: string
+  children?: SnapshotTreeNode[]
+  isLeaf?: boolean
+  item: SnapshotItem
 }
 
 /**

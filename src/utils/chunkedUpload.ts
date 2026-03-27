@@ -38,18 +38,20 @@ function createChunks(data: unknown, chunkSize: number = DEFAULT_CHUNK_SIZE): {
 
 /**
  * Uploads data in chunks to the server
- * 
+ *
  * @param apiUrl - Base API URL
  * @param filename - Target filename
  * @param data - Data to upload
  * @param onProgress - Optional progress callback
+ * @param parentId - Optional parent folder ID
  * @returns Promise resolving when upload is complete
  */
 export async function uploadInChunks(
   apiUrl: string,
   filename: string,
   data: unknown,
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  parentId: string | null = null
 ): Promise<void> {
   const { chunks, totalChunks } = createChunks(data)
   const uploadId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
@@ -66,6 +68,7 @@ export async function uploadInChunks(
         totalChunks,
         chunkData: chunks[i],
         isLastChunk: i === chunks.length - 1,
+        parentId,
       }),
     })
     
