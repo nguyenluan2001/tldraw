@@ -1,0 +1,5 @@
+- Using tailwindcss for styling
+- Write clean code as much as possible
+- Your job is writing code, if need run command then tell me
+- Folder structure must follow the standard, don't put all the things in 1 places
+- Code must have comment for each function, feature, component
