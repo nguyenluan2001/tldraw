@@ -1313,6 +1313,41 @@
           "scale": 1
         }
       },
+      "shape:dlbJC_3ycClRb5Zo6iCvL": {
+        "x": 4858.884405129031,
+        "y": 5272.444183452356,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:dlbJC_3ycClRb5Zo6iCvL",
+        "type": "draw",
+        "props": {
+          "segments": [
+            {
+              "type": "free",
+              "points": [
+                {
+                  "x": 0,
+                  "y": 0,
+                  "z": 0.5
+                }
+              ]
+            }
+          ],
+          "color": "black",
+          "fill": "none",
+          "dash": "draw",
+          "size": "m",
+          "isComplete": true,
+          "isClosed": false,
+          "isPen": false,
+          "scale": 1
+        },
+        "parentId": "page:page",
+        "index": "ayCEk",
+        "typeName": "shape"
+      },
       "binding:d9jp80Ui7_Ttmj2B3anv5": {
         "meta": {},
         "id": "binding:d9jp80Ui7_Ttmj2B3anv5",
@@ -3274,19 +3309,17 @@
     "exportBackground": true,
     "isFocusMode": false,
     "isDebugMode": false,
-    "isToolLocked": false,
+    "isToolLocked": true,
     "isGridMode": false,
     "pageStates": [
       {
         "pageId": "page:page",
         "camera": {
-          "x": 4955.644554386082,
-          "y": 1094.5428545107918,
-          "z": 0.19071762854675
+          "x": 2972.980724933717,
+          "y": 2630.458272053139,
+          "z": 0.11261685248057042
         },
-        "selectedShapeIds": [
-          "shape:QtafPAogIcAVUTlBl9VI7"
-        ],
+        "selectedShapeIds": [],
         "focusedGroupId": null
       }
     ]
