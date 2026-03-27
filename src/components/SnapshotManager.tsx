@@ -79,6 +79,9 @@ const { Text, Title } = Typography
 /** Auto-save interval in milliseconds (5 seconds) */
 const AUTO_SAVE_INTERVAL = 5000
 
+/** LocalStorage key for persisting current snapshot */
+const CURRENT_SNAPSHOT_KEY = 'tldraw-current-snapshot'
+
 /**
  * Snapshot Manager Component
  * 
@@ -99,8 +102,15 @@ function SnapshotManager() {
   /** Loading state for data fetching */
   const [loading, setLoading] = useState(false)
   
-  /** Current active snapshot */
-  const [currentSnapshot, setCurrentSnapshot] = useState<{ name: string; filename: string } | null>(null)
+  /** Current active snapshot - initialized from localStorage */
+  const [currentSnapshot, setCurrentSnapshot] = useState<{ name: string; filename: string } | null>(() => {
+    try {
+      const saved = localStorage.getItem(CURRENT_SNAPSHOT_KEY)
+      return saved ? JSON.parse(saved) : null
+    } catch {
+      return null
+    }
+  })
   
   /** Auto-save enabled state */
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true)
@@ -380,6 +390,34 @@ function SnapshotManager() {
       loadSnapshots()
     }
   }, [isVisible, loadSnapshots])
+
+  // Persist current snapshot to localStorage
+  useEffect(() => {
+    if (currentSnapshot) {
+      localStorage.setItem(CURRENT_SNAPSHOT_KEY, JSON.stringify(currentSnapshot))
+    } else {
+      localStorage.removeItem(CURRENT_SNAPSHOT_KEY)
+    }
+  }, [currentSnapshot])
+
+  // Auto-load saved snapshot on mount
+  useEffect(() => {
+    const loadSavedSnapshot = async () => {
+      if (currentSnapshot) {
+        try {
+          const data = await loadSnapshotFromServer(currentSnapshot.filename)
+          loadSnapshot(editor.store, data as any)
+          message.info(`Restored snapshot "${currentSnapshot.name}"`)
+        } catch (error) {
+          console.error('Failed to restore snapshot:', error)
+          // Clear invalid snapshot reference
+          setCurrentSnapshot(null)
+          localStorage.removeItem(CURRENT_SNAPSHOT_KEY)
+        }
+      }
+    }
+    loadSavedSnapshot()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Table row selection config
   const rowSelection = {
