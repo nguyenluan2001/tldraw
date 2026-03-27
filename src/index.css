@@ -13,3 +13,8 @@ html, body, #root {
   height: 100%;
   overflow: hidden;
 }
+
+/* Hide tldraw watermark */
+.tl-watermark_SEE-LICENSE {
+  display: none !important;
+}
