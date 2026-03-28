@@ -104,22 +104,22 @@ const CURRENT_SNAPSHOT_KEY = 'tldraw-current-snapshot'
  */
 function SnapshotManager() {
   const editor = useEditor()
-  
+
   /** Visibility of the snapshot manager modal */
   const [isVisible, setIsVisible] = useState(false)
-  
+
   /** List of available snapshots */
   const [snapshots, setSnapshots] = useState<SnapshotInfo[]>([])
-  
+
   /** List of folders */
   const [folders, setFolders] = useState<SnapshotFolder[]>([])
-  
+
   /** Current folder being viewed (null for root) */
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
-  
+
   /** Loading state for data fetching */
   const [loading, setLoading] = useState(false)
-  
+
   /** Current active snapshot - initialized from localStorage */
   const [currentSnapshot, setCurrentSnapshot] = useState<{ name: string; filename: string } | null>(() => {
     try {
@@ -129,34 +129,37 @@ function SnapshotManager() {
       return null
     }
   })
-  
+
   /** Auto-save enabled state */
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true)
-  
+
   /** Saving state indicator */
   const [isSaving, setIsSaving] = useState(false)
-  
+
+  /** Last save time */
+  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null)
+
   /** Create modal visibility */
   const [createModalVisible, setCreateModalVisible] = useState(false)
-  
+
   /** Create folder modal visibility */
   const [createFolderModalVisible, setCreateFolderModalVisible] = useState(false)
-  
+
   /** Rename modal visibility */
   const [renameModalVisible, setRenameModalVisible] = useState(false)
-  
+
   /** Item being renamed */
   const [renamingItem, setRenamingItem] = useState<SnapshotItem | null>(null)
-  
+
   /** New name input for create/rename */
   const [newName, setNewName] = useState('')
-  
+
   /** Selected items for export */
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
-  
+
   /** Import progress */
   const [importProgress, setImportProgress] = useState<number | null>(null)
-  
+
   /** File input ref for import */
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -190,9 +193,10 @@ function SnapshotManager() {
     try {
       const { document, session } = getSnapshot(editor.store)
       const filename = await saveSnapshot(newName.trim(), { document, session }, undefined, currentFolderId)
-      
+
       setCurrentSnapshot({ name: newName.trim(), filename })
       setAutoSaveEnabled(true)
+      setLastSaveTime(new Date())
       message.success(`Snapshot "${newName}" created successfully`)
       setCreateModalVisible(false)
       setNewName('')
@@ -233,7 +237,7 @@ function SnapshotManager() {
     try {
       const data = await loadSnapshotFromServer(snapshot.filename)
       loadSnapshot(editor.store, data as any)
-      
+
       setCurrentSnapshot({ name: snapshot.name, filename: snapshot.filename })
       setAutoSaveEnabled(true)
       message.success(`Snapshot "${snapshot.name}" loaded`)
@@ -257,13 +261,13 @@ function SnapshotManager() {
         await renameFolder(renamingItem.id, newName.trim())
       } else {
         const newFilename = await renameSnapshot(renamingItem.filename, newName.trim())
-        
+
         // Update current snapshot if renaming the active one
         if (currentSnapshot?.filename === renamingItem.filename) {
           setCurrentSnapshot({ name: newName.trim(), filename: newFilename })
         }
       }
-      
+
       message.success('Renamed successfully')
       setRenameModalVisible(false)
       setRenamingItem(null)
@@ -281,13 +285,13 @@ function SnapshotManager() {
   const handleDeleteSnapshot = useCallback(async (snapshot: SnapshotInfo) => {
     try {
       await deleteSnapshot(snapshot.filename)
-      
+
       // Clear current snapshot if deleting the active one
       if (currentSnapshot?.filename === snapshot.filename) {
         setCurrentSnapshot(null)
         setAutoSaveEnabled(true)
       }
-      
+
       message.success('Snapshot deleted')
       loadData()
     } catch (error) {
@@ -323,6 +327,7 @@ function SnapshotManager() {
     try {
       const { document, session } = getSnapshot(editor.store)
       await updateSnapshot(currentSnapshot.filename, { document, session })
+      setLastSaveTime(new Date())
       message.success('Snapshot saved')
     } catch (error) {
       message.error('Failed to save snapshot')
@@ -379,10 +384,10 @@ function SnapshotManager() {
    * Handles exporting selected snapshots
    */
   const handleExport = useCallback(async () => {
-    const selectedFilenames = Array.from(selectedItems).filter(id => 
+    const selectedFilenames = Array.from(selectedItems).filter(id =>
       snapshots.find(s => s.filename === id)
     )
-    
+
     if (selectedFilenames.length === 0) {
       message.warning('No snapshots selected')
       return
@@ -439,12 +444,31 @@ function SnapshotManager() {
   }, [])
 
   /**
-   * Formats file size for display
+   * Formats file size for display with proper units
    */
   const formatSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    let size = bytes
+    let unitIndex = 0
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024
+      unitIndex++
+    }
+
+    // Show decimal only for KB and above, and only when needed
+    if (unitIndex === 0) {
+      return `${size} ${units[unitIndex]}`
+    }
+    return `${size.toFixed(1)} ${units[unitIndex]}`
+  }
+
+  /**
+   * Formats last save time for display
+   */
+  const formatLastSaveTime = (date: Date | null): string => {
+    if (!date) return 'Never'
+    return date.toLocaleTimeString()
   }
 
   /**
@@ -464,6 +488,7 @@ function SnapshotManager() {
       try {
         const { document, session } = getSnapshot(editor.store)
         await updateSnapshot(currentSnapshot.filename, { document, session })
+        setLastSaveTime(new Date())
       } catch (error) {
         console.error('Auto-save failed:', error)
       } finally {
@@ -574,14 +599,48 @@ function SnapshotManager() {
 
   return createPortal(
     <>
+      {/* Saving indicator - subtle badge at top-right when auto-save is active */}
+      {autoSaveEnabled && currentSnapshot && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 12,
+            right: "45vw",
+            padding: '4px 12px',
+            borderRadius: 16,
+            backgroundColor: isSaving ? 'rgba(24, 144, 255, 0.9)' : 'rgba(82, 196, 26, 0.9)',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 12,
+            fontWeight: 500,
+            zIndex: 9999,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            transition: 'all 0.3s ease',
+          }}
+        >
+          {isSaving ? (
+            <>
+              <SyncOutlined spin style={{ fontSize: 11 }} />
+              <span>Saving...</span>
+            </>
+          ) : (
+            <>
+              <span style={{ opacity: 0.9 }}>Saved {formatLastSaveTime(lastSaveTime)}</span>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Floating toggle button */}
       <FloatButton
         icon={<FolderOutlined />}
         type={currentSnapshot ? 'primary' : 'default'}
         onClick={() => setIsVisible(true)}
         tooltip="Open Snapshot Manager"
-        style={{ 
-          right: 24, 
+        style={{
+          right: 24,
           bottom: 24,
           width: 48,
           height: 48,
@@ -666,7 +725,7 @@ function SnapshotManager() {
           >
             Import
           </Button>
-          
+
           {selectedItems.size > 0 && (
             <Button
               icon={<DownloadOutlined />}
@@ -780,7 +839,7 @@ function SnapshotManager() {
                         }
                       </div>
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        {item.type === 'folder' 
+                        {item.type === 'folder'
                           ? `${folders.filter(f => f.parentId === item.id).length} folders, ${snapshots.filter(s => s.parentId === item.id).length} snapshots`
                           : `${formatSize(item.size)} • ${formatDate(item.createdAt)}`
                         }
