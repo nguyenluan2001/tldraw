@@ -18,3 +18,91 @@ html, body, #root {
 .tl-watermark_SEE-LICENSE {
   display: none !important;
 }
+
+/* Ensure style panel is above background */
+.tl-style-panel {
+  position: relative;
+  z-index: 400;
+  pointer-events: auto;
+}
+
+.tl-style-panel__section {
+  pointer-events: auto;
+}
+
+.tl-style-panel input {
+  pointer-events: auto;
+}
+
+/* Grid config panel styling to match default style panel */
+.tl-grid-config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background-color: var(--color-panel);
+  border-radius: 8px;
+  border: 1px solid var(--color-divider);
+  margin-top: 8px;
+}
+
+.tl-grid-config-section__title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tl-grid-config-section__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tl-grid-config-section__label {
+  font-size: 12px;
+  color: var(--color-text-1);
+  min-width: 32px;
+}
+
+.tl-grid-config-section__input {
+  width: 48px;
+  padding: 4px 6px;
+  border: 1px solid var(--color-divider);
+  border-radius: 4px;
+  font-size: 11px;
+  text-align: center;
+  background-color: var(--color-background);
+  color: var(--color-text-1);
+  outline: none;
+}
+
+.tl-grid-config-section__input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-soft);
+}
+
+/* Custom toolbar button styling */
+.tl-toolbar-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  cursor: pointer;
+  color: var(--color-text-1);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tl-toolbar-button:hover {
+  background-color: var(--color-hover);
+}
+
+.tl-toolbar-button--selected {
+  background-color: var(--color-primary);
+  color: white;
+}

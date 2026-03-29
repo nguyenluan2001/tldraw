@@ -24,11 +24,15 @@ import {
     type TLComponents,
 } from 'tldraw'
 import 'tldraw/tldraw.css'
+import { LassoIcon, GridFourIcon } from '@phosphor-icons/react'
 import { SnapshotManager } from './components'
 import { LassoSelectTool } from './tools/LassoSelectTool'
 import { PolylineArrowTool } from './tools/PolylineArrowTool'
+import { GridTool } from './tools/GridTool'
 import { PolylineArrowUtil } from './shapes/PolylineArrowShape'
+import { GridUtil } from './shapes/GridShape'
 import { LassoOverlays } from './components/LassoSelectOverlay'
+import { GridConfigPanel } from './components/GridConfigPanel'
 
 /**
  * UI Overrides for custom tools
@@ -57,6 +61,15 @@ const uiOverrides: TLUiOverrides = {
                 editor.setCurrentTool('polyline-arrow')
             },
         }
+        tools['grid'] = {
+            id: 'grid',
+            icon: 'grid',
+            label: 'Grid',
+            kbd: 'g',
+            onSelect: () => {
+                editor.setCurrentTool('grid')
+            },
+        }
         return tools
     },
 }
@@ -74,10 +87,24 @@ const components: TLComponents = {
         const tools = useTools()
         const isLassoSelected = useIsToolSelected(tools['lasso-select'])
         const isPolylineArrowSelected = useIsToolSelected(tools['polyline-arrow'])
+        const isGridSelected = useIsToolSelected(tools['grid'])
         return (
             <DefaultToolbar {...props}>
-                <TldrawUiMenuItem {...tools['lasso-select']} isSelected={isLassoSelected} />
+                <button
+                    className={`tl-toolbar-button ${isLassoSelected ? 'tl-toolbar-button--selected' : ''}`}
+                    onClick={() => tools['lasso-select'].onSelect('toolbar')}
+                    title={`${tools['lasso-select'].label} (${tools['lasso-select'].kbd})`}
+                >
+                    <LassoIcon size={18} color={isLassoSelected ? '#fcfcfc' : undefined} />
+                </button>
                 <TldrawUiMenuItem {...tools['polyline-arrow']} isSelected={isPolylineArrowSelected} />
+                <button
+                    className={`tl-toolbar-button ${isGridSelected ? 'tl-toolbar-button--selected' : ''}`}
+                    onClick={() => tools['grid'].onSelect('toolbar')}
+                    title={`${tools['grid'].label} (${tools['grid'].kbd})`}
+                >
+                    <GridFourIcon size={18} color={isGridSelected ? '#fcfcfc' : undefined} />
+                </button>
                 <DefaultToolbarContent />
             </DefaultToolbar>
         )
@@ -89,6 +116,7 @@ const components: TLComponents = {
                 <DefaultKeyboardShortcutsDialogContent />
                 <TldrawUiMenuItem {...tools['lasso-select']} />
                 <TldrawUiMenuItem {...tools['polyline-arrow']} />
+                <TldrawUiMenuItem {...tools['grid']} />
             </DefaultKeyboardShortcutsDialog>
         )
     },
@@ -97,6 +125,7 @@ const components: TLComponents = {
             <LassoOverlays />
         </>
     ),
+    StylePanel: GridConfigPanel,
     SharePanel: SnapshotManager,
 }
 
@@ -123,8 +152,8 @@ export default function App() {
         /** Full-screen container for the tldraw editor */
         <div className="fixed inset-0">
             <Tldraw
-                shapeUtils={[PolylineArrowUtil]}
-                tools={[LassoSelectTool, PolylineArrowTool]}
+                shapeUtils={[PolylineArrowUtil, GridUtil]}
+                tools={[LassoSelectTool, PolylineArrowTool, GridTool]}
                 overrides={uiOverrides}
                 components={components}
                 persistenceKey="tldraw-snapshots"
